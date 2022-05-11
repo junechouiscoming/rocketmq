@@ -279,7 +279,7 @@ public class BrokerController {
                 this.brokerConfig.getSendMessageThreadPoolNums(),
                 1000 * 60,
                 TimeUnit.MILLISECONDS,
-                this.sendThreadPoolQueue,
+                this.sendThreadPoolQueue, /* 任务队列，默认为10000，详见BrokerConfig#sendThreadPoolQueueCapacity */
                 new ThreadFactoryImpl("SendMessageThread_"));
 
             this.putMessageFutureExecutor = new BrokerFixedThreadPoolExecutor(
@@ -346,6 +346,7 @@ public class BrokerController {
                 Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                     "ConsumerManageThread_"));
 
+            // 注册处理器，里面生成了大量的处理器，这些处理器均实现了NettyRequestProcessor接口
             this.registerProcessor();
 
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();

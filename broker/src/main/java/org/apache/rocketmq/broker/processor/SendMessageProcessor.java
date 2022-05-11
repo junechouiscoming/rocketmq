@@ -110,6 +110,12 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
     @Override
     public boolean rejectRequest() {
+        /*
+         * 任何一个条件满足都会返回true，该方法的作用就是用来终止请求的
+         * 别的地方调用都是以if (pair.getObject1().rejectRequest())形式来判断
+         * 1. 判断操作系统PageCache是否繁忙。如果繁忙，则返回true
+         * 2. 判断TransientStorePool是否不足
+         */
         return this.brokerController.getMessageStore().isOSPageCacheBusy() ||
             this.brokerController.getMessageStore().isTransientStorePoolDeficient();
     }

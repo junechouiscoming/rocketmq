@@ -1378,6 +1378,11 @@ public class MQClientAPIImpl {
 
         RemotingCommand response = this.remotingClient.invokeSync(null, request, timeoutMillis);
         assert response != null;
+        /*
+         * 从netty的返回对象中获取code
+         * 成功则decode同时返回topicRouteData对象
+         * 失败则抛MQClientException异常，
+         */
         switch (response.getCode()) {
             case ResponseCode.TOPIC_NOT_EXIST: {
                 if (allowTopicNotExist) {

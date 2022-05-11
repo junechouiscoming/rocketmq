@@ -184,15 +184,25 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             case CREATE_JUST:
                 this.serviceState = ServiceState.START_FAILED;
 
+                // 校验配置
                 this.checkConfig();
 
+                // 改变producerGroup的instanceName为进程id
                 if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
 
+                /*
+                 * 饿汉式单例用法：MQClientManager.getInstance()返回是MQClientManager对象。该对象有且只有一个
+                 * 然后再执行对象.方法，也就是instance.getOrCreateMQClientInstance(final ClientConfig clientConfig, RPCHook rpcHook)
+                 * 这个方法第一个形参是ClientConfig类型的，但是下面传入的是DefaultMQProducer类型的，实际上DefaultMQProducer继承了
+                 * ClientConfig，这也是多态的体现
+                 */
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
+                // 注册producer
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
+                // 如果注册失败，则说明producerTable内已经有个这个producerGroup，将serviceState调整为CREATE_JUST并抛异常
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
                     throw new MQClientException("The producer group[" + this.defaultMQProducer.getProducerGroup()
@@ -200,9 +210,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         null);
                 }
 
+                // 在topicPublishInfoTable中放入key="TBW102", value=topicPublishInfo对象
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
                 if (startFactory) {
+                    // 开始构建mQClient
                     mQClientFactory.start();
                 }
 
@@ -223,11 +235,17 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
+        // 单例模式：等同于只能通过getInstance()获取RequestFutureHolder对象，然后调用startScheduledTask()
         RequestFutureHolder.getInstance().startScheduledTask(this);
 
     }
 
     private void checkConfig() throws MQClientException {
+        /*
+         * 1、校验group是否为空
+         * 2、校验group的长度是否大于255
+         * 3、校验group的名字是否含有非法字符
+         */
         Validators.checkGroup(this.defaultMQProducer.getProducerGroup());
 
         if (null == this.defaultMQProducer.getProducerGroup()) {
@@ -409,6 +427,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return this.defaultMQProducer.isUnitMode();
     }
 
+    // 没有被调用的方法，创建topic的方法在org.apache.rocketmq.broker.processor.AdminBrokerProcessor#updateAndCreateTopic
     public void createTopic(String key, String newTopic, int queueNum) throws MQClientException {
         createTopic(key, newTopic, queueNum, 0);
     }
@@ -544,12 +563,21 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         final SendCallback sendCallback,
         final long timeout
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        // 确保当前对象（生产者，其实就是defaultMQProducerImpl对象）状态为RUNNING
         this.makeSureStateOK();
+        /*
+         * 1. 校验消息是否为null
+         * 2. 消息体是否为null
+         * 3. 消息的长度是否为0
+         * 4. 消息体的大小是否超过4M
+         * 5. 里面还校验了topic等信息
+         */
         Validators.checkMessage(msg, this.defaultMQProducer);
         final long invokeID = random.nextLong();
         long beginTimestampFirst = System.currentTimeMillis();
         long beginTimestampPrev = beginTimestampFirst;
         long endTimestamp = beginTimestampFirst;
+        // 尝试获取topic的路由信息
         TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
         if (topicPublishInfo != null && topicPublishInfo.ok()) {
             boolean callTimeout = false;
@@ -577,6 +605,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             break;
                         }
 
+                        // 这里开始真正的发送消息到broker，如果发送的topic在broker端没有，且未开启autoCreateTopicEnable，这里会抛异常
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
                         endTimestamp = System.currentTimeMillis();
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
@@ -677,6 +706,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
+        /*
+         * producer第一次启动的时候，topicPublishInfoTable一定是空的，
+         * 那么一定会进入到第一个if内，构造一个topicPublishInfo对象，
+         * 此对象的haveTopicRouterInfo属性是false，messageQueueList为空
+         * 然后再调用MQClientInstance的updateTopicRouteInfoFromNameServer从namesrv更新topic路由信息
+         */
         TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
         if (null == topicPublishInfo || !topicPublishInfo.ok()) {
             this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
@@ -687,6 +722,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
+            // 这里说明从namesrv没有获取到topic的路由信息，所以这里传入了isDefault参数，方法里面会进行判断
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;

@@ -146,6 +146,12 @@ public class MQClientInstance {
 
         this.rebalanceService = new RebalanceService(this);
 
+        /*
+         * 把客户端传过来的一些自定义参数，比如namesrv的地址还有之前经过转换的instance值重新同步设置给下面new出来的defaultMQProducer对象
+         * 这也就做到了这个新对象除了producerName和之前的对象不一样外，其余的全都一样
+         * 这两步的作用就是我每调用一次MQClientManager.getOrCreateMQClientInstance生成客户端自定义参数的实例外，
+         * 在内部还会生成一个producerName=CLIENT_INNER_PRODUCER的defaultMQProducer对象
+         */
         this.defaultMQProducer = new DefaultMQProducer(MixAll.CLIENT_INNER_PRODUCER_GROUP);
         this.defaultMQProducer.resetClientConfig(clientConfig);
 
@@ -241,6 +247,7 @@ public class MQClientInstance {
                     // Start rebalance service
                     this.rebalanceService.start();
                     // Start push service
+                    // 这里的this.defaultMQProducer对象是149行new出来的新对象，且producerGroup的值是CLIENT_INNER_PRODUCER
                     this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
                     log.info("the client factory [{}] start OK", this.clientId);
                     this.serviceState = ServiceState.RUNNING;
@@ -610,6 +617,7 @@ public class MQClientInstance {
                 try {
                     TopicRouteData topicRouteData;
                     if (isDefault && defaultMQProducer != null) {
+                        // 从namesrv获取TBW102的路由信息
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             clientConfig.getMqClientApiTimeout());
                         if (topicRouteData != null) {
@@ -620,6 +628,7 @@ public class MQClientInstance {
                             }
                         }
                     } else {
+                        // 通过netty从namesrv远程获取topicRouteData信息
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, clientConfig.getMqClientApiTimeout());
                     }
                     if (topicRouteData != null) {
@@ -640,6 +649,7 @@ public class MQClientInstance {
 
                             // Update Pub info
                             if (!producerTable.isEmpty()) {
+                                // 把topicRouteData转换为TopicPublishInfo
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
                                 publishInfo.setHaveTopicRouterInfo(true);
                                 Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
@@ -915,6 +925,7 @@ public class MQClientInstance {
             return false;
         }
 
+        // 用putIfAbsent把group和producer对象放入到producerTable中
         MQProducerInner prev = this.producerTable.putIfAbsent(group, producer);
         if (prev != null) {
             log.warn("the producer group[{}] exist already.", group);

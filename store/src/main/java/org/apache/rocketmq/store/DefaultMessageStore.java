@@ -536,9 +536,20 @@ public class DefaultMessageStore implements MessageStore {
 
     @Override
     public boolean isOSPageCacheBusy() {
+        /*
+         * 通俗一点讲，就是将消息写入CommitLog文件所持有锁的时间，精确说是将消息体追加到内存映射文件或者pageCache该过程中开始持有锁的时间戳，
+         * 具体代码参考：CommitLog#asyncPutMessage
+         */
         long begin = this.getCommitLog().getBeginTimeInLock();
+        /*
+         * 一次消息追加过程中持有锁的总时长，即往内存映射文件或pageCache追加一条消息所消耗的时间
+         */
         long diff = this.systemClock.now() - begin;
 
+        /*
+         * 如果一次消息追加过程的时间超过了Broker配置文件osPageCacheBusyTimeOutMills，则认为pageCache繁忙
+         * osPageCacheBusyTimeOutMills默认为1000，即1s
+         */
         return diff < 10000000
             && diff > this.messageStoreConfig.getOsPageCacheBusyTimeOutMills();
     }
